@@ -5,8 +5,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { io } from "socket.io-client";
 import playersData from "./data/players";
 
-// Socket.IO connection
-const SOCKET_URL = 'http://localhost:3001';
+// Socket.IO connection - uses env variable for deployment
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || process.env.REACT_APP_SOCKET_URL || 'http://localhost:3001';
 
 // Team color schemes for professional look
 const TEAM_COLORS = {
