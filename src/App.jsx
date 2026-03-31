@@ -1,14 +1,9 @@
 // 🏏 PROFESSIONAL IPL AUCTION SIMULATION
 // Features: Modern UI, animations, real-time updates, error handling, MULTIPLAYER
 
-
-
 import { useState, useEffect, useRef, useCallback } from "react";
-import { io } from "socket.io-client";
 import playersData from "./data/players";
-
-// Socket.IO connection - uses env variable for deployment
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || process.env.REACT_APP_SOCKET_URL || 'http://localhost:3001';
+import { useFirestoreAuction } from "./hooks/useFirestoreAuction";
 
 // Team color schemes for professional look
 const TEAM_COLORS = {
@@ -72,17 +67,36 @@ export default function App() {
   const [activeTeam, setActiveTeam] = useState(null);
   const [bidHistory, setBidHistory] = useState([]);
   const [soldPlayers, setSoldPlayers] = useState([]);
-  
-  // Multiplayer state
+
+  // Firestore Multiplayer hook
+  const {
+    userId: fsUserId,
+    userName: fsUserName,
+    myTeam: fsMyTeam,
+    myTeamData: fsMyTeamData,
+    auction: fsAuction,
+    teams: fsTeams,
+    teamsArray: fsTeamsArray,
+    bids: fsBids,
+    isConnected: fsIsConnected,
+    error: fsError,
+    roomId: fsRoomId,
+    isHost: fsIsHost,
+    createRoom: fsCreateRoom,
+    joinRoom: fsJoinRoom,
+    joinAuction,
+    startAuction,
+    placeBid,
+    sell: fsSell,
+    skip: fsSkip
+  } = useFirestoreAuction(playersData);
+
   const [isMultiplayer, setIsMultiplayer] = useState(false);
-  const [socket, setSocket] = useState(null);
-  const [roomId, setRoomId] = useState(null);
-  const [connectedUsers, setConnectedUsers] = useState([]);
-  const [isHost, setIsHost] = useState(false);
   const [userName, setUserName] = useState("");
+  const [teamName, setTeamName] = useState("");
   const [joinRoomId, setJoinRoomId] = useState("");
-  const [isConnected, setIsConnected] = useState(false);
-  const [mpTeams, setMpTeams] = useState([]); // Dynamic teams for multiplayer
+  const [hasJoined, setHasJoined] = useState(false);
+  const [isHost, setIsHost] = useState(true);
 
   const [teams, setTeams] = useState([
     { name: "RCB", budget: 100, squad: [], color: TEAM_COLORS.RCB, isAI: true },
@@ -102,115 +116,21 @@ export default function App() {
   const soldSound = useRef(new Audio("https://www.soundjay.com/misc/sounds/bell-ringing-01.mp3"));
   const timerWarningSound = useRef(new Audio("https://www.soundjay.com/buttons/sounds/button-3.mp3"));
 
-  // Initialize socket connection for multiplayer
+  // Sync Firestore auction data to local state
   useEffect(() => {
-    console.log('[Socket] Initializing connection to', SOCKET_URL);
-    
-    const newSocket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
-      timeout: 10000,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
-
-    newSocket.on('connect', () => {
-      console.log('[Socket] ✅ Connected to server successfully');
-      console.log('[Socket] Socket ID:', newSocket.id);
-      setIsConnected(true);
-    });
-
-    newSocket.on('connect_error', (error) => {
-      console.error('[Socket] ❌ Connection error:', error.message);
-      console.log('[Socket] Is backend server running on port 3001?');
-      setIsConnected(false);
-    });
-
-    newSocket.on('disconnect', (reason) => {
-      console.log('[Socket] ⚠️ Disconnected:', reason);
-      setIsConnected(false);
-    });
-
-    newSocket.on('reconnect_attempt', (attempt) => {
-      console.log('[Socket] Reconnection attempt', attempt);
-    });
-
-    newSocket.on('newBid', (data) => {
-      console.log('[Socket] New bid received:', data);
-      setBid(data.bid);
-      setHighest(data.team);
-      setTimer(15);
-      setBidAnimation(true);
-      setTimeout(() => setBidAnimation(false), 300);
-      
-      // Use server-provided bid history for synchronization
-      if (data.bidHistory) {
-        console.log('[Socket] Syncing bid history from server:', data.bidHistory.length, 'entries');
-        setBidHistory(data.bidHistory.map(bid => ({
-          id: bid.id,
-          team: bid.team,
-          player: bid.player,
-          amount: bid.amount,
-          increment: bid.increment,
-          time: new Date(bid.timestamp).toLocaleTimeString()
-        })));
-      }
-      
-      playBid();
-    });
-
-    newSocket.on('playerSold', (data) => {
-      console.log('[Socket] Player sold:', data);
-    });
-
-    // Room events
-    newSocket.on('roomCreated', (data) => {
-      console.log('[Socket] Room created:', data.roomId);
-      setRoomId(data.roomId);
-      setIsHost(true);
-      setIsMultiplayer(true);
-      setConnectedUsers([data.user]);
-      // Create team for host in multiplayer
-      if (data.teams) {
-        setMpTeams(data.teams);
-      } else {
-        setMpTeams([{
-          name: userName,
-          budget: 100,
-          squad: [],
-          color: '#00d4ff',
-          isAI: false
-        }]);
-      }
-    });
-
-    newSocket.on('roomJoined', (data) => {
-      console.log('[Socket] Joined room:', data.roomId);
-      setRoomId(data.roomId);
-      setIsHost(false);
-      setIsMultiplayer(true);
-      setConnectedUsers(data.users);
-      // Use teams from server
-      if (data.teams) {
-        setMpTeams(data.teams);
-      }
-    });
-
-    newSocket.on('userJoined', (data) => {
-      console.log('[Socket] User joined:', data.user.name);
-      setConnectedUsers(data.users);
-      // Update teams when new user joins
-      if (data.teams) {
-        setMpTeams(data.teams);
-      }
-    });
-
-    setSocket(newSocket);
-
-    return () => {
-      console.log('[Socket] Cleaning up socket connection');
-      newSocket.close();
-    };
-  }, []);
+    if (isMultiplayer && fsAuction) {
+      console.log("[DEBUG] Firestore auction updated:", {
+        highestBidderId: fsAuction.highestBidderId,
+        highestBidderName: fsAuction.highestBidderName,
+        currentBid: fsAuction.currentBid,
+        currentPlayer: fsAuction.currentPlayer?.name
+      });
+      setBid(fsAuction.currentBid || 0);
+      // Show highestBidderName if exists, otherwise null
+      setHighest(fsAuction.highestBidderName || null);
+      setTimer(fsAuction.timer || 15);
+    }
+  }, [isMultiplayer, fsAuction]);
 
   const playBid = () => {
     bidSound.current.volume = 0.3;
@@ -407,9 +327,11 @@ export default function App() {
     setBidAnimation(true);
     setTimeout(() => setBidAnimation(false), 300);
     
-    // Emit socket event for multiplayer
-    if (isMultiplayer && socket) {
-      socket.emit('placeBid', { roomId, bid: newBid, team, increment });
+    // Firestore multiplayer bid
+    if (isMultiplayer) {
+      placeBid(newBid).catch(err => {
+        console.error("[USER BID] Firestore error:", err);
+      });
     }
     
     // Add to bid history
@@ -467,6 +389,13 @@ export default function App() {
 
     setTeams(updated);
     
+    // Firestore multiplayer - sell player
+    if (isMultiplayer && fsAuction?.highestBidder) {
+      fsSell().catch(err => {
+        console.error("[FINALIZE] Firestore sell error:", err);
+      });
+    }
+    
     // Add to sold players history
     setSoldPlayers(prev => [{
       id: Date.now(),
@@ -516,42 +445,66 @@ export default function App() {
   };
 
   // Multiplayer room management
-  const createRoom = () => {
+  const createRoom = async () => {
     console.log("[CREATE ROOM] ========== BUTTON CLICKED ==========");
     console.log("[CREATE ROOM] userName:", userName);
-    console.log("[CREATE ROOM] socket connected:", socket?.connected);
+    console.log("[CREATE ROOM] teamName:", teamName);
     
-    if (!userName.trim()) {
+    // STRICT NULL CHECK - Ensure inputs are never null
+    const safeUserName = (userName || '').toString();
+    const safeTeamName = (teamName || '').toString();
+    
+    console.log("[CREATE ROOM] safeUserName:", safeUserName);
+    console.log("[CREATE ROOM] safeTeamName:", safeTeamName);
+    
+    // GUARD CLAUSE - Stop if null
+    if (!safeUserName || typeof safeUserName !== 'string' || safeUserName.trim() === '') {
       console.log("[CREATE ROOM] ❌ Validation failed - no username");
-      showError("Please enter your name");
+      alert("Enter valid name");
       return;
     }
     
-    if (!socket) {
-      console.log("[CREATE ROOM] ❌ Socket not initialized");
-      showError("Connection not ready. Please wait...");
+    if (!safeTeamName || typeof safeTeamName !== 'string' || safeTeamName.trim() === '') {
+      console.log("[CREATE ROOM] ❌ Validation failed - no team name");
+      alert("Enter valid team name");
       return;
     }
     
-    if (!socket.connected) {
-      console.log("[CREATE ROOM] ❌ Socket not connected");
-      showError("Not connected to server. Is backend running?");
-      return;
+    try {
+      console.log("[CREATE ROOM] ✅ All validations passed");
+      const newRoomId = await fsCreateRoom();
+      console.log("[CREATE ROOM] Created room:", newRoomId);
+      
+      if (!newRoomId || typeof newRoomId !== 'string') {
+        throw new Error('Failed to generate valid room ID');
+      }
+      
+      // Ensure trimmed values are strings before passing
+      const trimmedUserName = safeUserName.trim();
+      const trimmedTeamName = safeTeamName.trim();
+      
+      console.log("[CREATE ROOM] Joining with:", trimmedUserName, trimmedTeamName, newRoomId);
+      await joinAuction(trimmedUserName, trimmedTeamName, newRoomId);
+      setIsMultiplayer(true);
+      setHasJoined(true);
+      console.log("[CREATE ROOM] Successfully joined auction in room:", newRoomId);
+    } catch (err) {
+      // Simplest possible error handling - no complex operations
+      console.error("[CREATE ROOM] ❌ Error raw:", err);
+      let msg = 'Failed to create room';
+      if (err) {
+        if (err.message) msg = err.message;
+        else msg = String(err);
+      }
+      alert(msg);
     }
-    
-    console.log("[CREATE ROOM] ✅ All validations passed");
-    console.log("[CREATE ROOM] Emitting 'createRoom' event with:", { name: userName, team: userName });
-    
-    // Use userName as team name in multiplayer
-    socket.emit('createRoom', { name: userName, team: userName });
-    
-    console.log("[CREATE ROOM] Event emitted. Waiting for 'roomCreated' response...");
   };
 
-  const joinRoom = (roomCode) => {
+  const joinRoom = async () => {
     console.log("[JOIN ROOM] ========== BUTTON CLICKED ==========");
-    console.log("[JOIN ROOM] roomCode:", roomCode);
     console.log("[JOIN ROOM] userName:", userName);
+    console.log("[JOIN ROOM] teamName:", teamName);
+    console.log("[JOIN ROOM] joinRoomId:", joinRoomId);
     
     if (!userName.trim()) {
       console.log("[JOIN ROOM] ❌ Validation failed - no username");
@@ -559,39 +512,44 @@ export default function App() {
       return;
     }
     
-    if (!roomCode || !roomCode.trim()) {
-      console.log("[JOIN ROOM] ❌ Validation failed - no room code");
-      showError("Please enter a room ID");
+    if (!teamName.trim()) {
+      console.log("[JOIN ROOM] ❌ Validation failed - no team name");
+      showError("Please enter your team name");
       return;
     }
     
-    if (!socket) {
-      console.log("[JOIN ROOM] ❌ Socket not initialized");
-      showError("Connection not ready. Please wait...");
+    if (!joinRoomId.trim()) {
+      console.log("[JOIN ROOM] ❌ Validation failed - no room ID");
+      showError("Please enter a room ID to join");
       return;
     }
     
-    if (!socket.connected) {
-      console.log("[JOIN ROOM] ❌ Socket not connected");
-      showError("Not connected to server. Is backend running?");
-      return;
+    try {
+      console.log("[JOIN ROOM] ✅ All validations passed");
+      // Join the room first
+      await fsJoinRoom(joinRoomId);
+      console.log("[JOIN ROOM] Joined room:", joinRoomId);
+      // Then join the auction in this room - pass roomId directly
+      await joinAuction(userName, teamName, joinRoomId);
+      setIsMultiplayer(true);
+      setHasJoined(true);
+      console.log("[JOIN ROOM] Successfully joined auction in room:", joinRoomId);
+    } catch (err) {
+      console.error("[JOIN ROOM] ❌ Error raw:", err);
+      let msg = 'Failed to join room';
+      if (err) {
+        if (err.message) msg = err.message;
+        else msg = String(err);
+      }
+      alert(msg);
     }
-    
-    console.log("[JOIN ROOM] ✅ All validations passed");
-    console.log("[JOIN ROOM] Emitting 'joinRoom' event with:", { roomId: roomCode.toUpperCase(), userData: { name: userName, team: userName } });
-    
-    // Use userName as team name in multiplayer
-    socket.emit('joinRoom', { roomId: roomCode.toUpperCase(), userData: { name: userName, team: userName } });
-    
-    console.log("[JOIN ROOM] Event emitted. Waiting for 'roomJoined' response...");
   };
 
-  const startMultiplayerAuction = () => {
-    if (socket && roomId) {
-      socket.emit('startAuction', { 
-        player: current,
-        basePrice: current.price,
-        roomId 
+  const startMultiplayerAuction = async () => {
+    if (current) {
+      await startAuction({
+        ...current,
+        basePrice: current.price
       });
       setStarted(true);
     }
@@ -654,10 +612,10 @@ export default function App() {
             <h3 style={styles.multiplayerTitle}>🌐 Multiplayer</h3>
             <p style={styles.multiplayerSubtitle}>Play with friends in real-time</p>
             <div style={styles.connectionStatus}>
-              {isConnected ? (
+              {fsIsConnected ? (
                 <span style={styles.statusConnected}>🟢 Connected</span>
               ) : (
-                <span style={styles.statusDisconnected}>🔴 Disconnected - Start backend server</span>
+                <span style={styles.statusDisconnected}>🔴 Disconnected - Check Firestore</span>
               )}
             </div>
           </div>
@@ -667,6 +625,13 @@ export default function App() {
             placeholder="Enter your name..."
             value={userName}
             onChange={(e) => setUserName(e.target.value)}
+          />
+
+          <input
+            style={styles.mpNameInput}
+            placeholder="Enter your team name..."
+            value={teamName}
+            onChange={(e) => setTeamName(e.target.value)}
           />
 
           {!isMultiplayer ? (
@@ -732,7 +697,7 @@ export default function App() {
                 <div style={styles.lobbyIcon}>🎮</div>
                 <h3 style={styles.lobbyTitle}>Game Lobby</h3>
                 <div style={styles.connectionStatus}>
-                  {isConnected ? (
+                  {fsIsConnected ? (
                     <span style={styles.statusConnected}>🟢 Connected</span>
                   ) : (
                     <span style={styles.statusDisconnected}>🔴 Disconnected</span>
@@ -740,28 +705,45 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Room ID Display */}
+              {/* Room Info Display - Show Room ID for Host */}
+              {fsIsHost && fsRoomId && (
+                <div style={styles.roomIdContainer}>
+                  <div style={styles.roomIdLabel}>ROOM ID (Share this)</div>
+                  <div style={styles.roomIdValue}>{fsRoomId}</div>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(fsRoomId);
+                      alert('Room ID copied to clipboard!');
+                    }}
+                    style={styles.copyBtn}
+                  >
+                    📋 Copy Room ID
+                  </button>
+                  <div style={styles.roomIdHint}>Share this ID with others to join</div>
+                </div>
+              )}
+
+              {/* Teams Count Display */}
               <div style={styles.roomIdContainer}>
-                <div style={styles.roomIdLabel}>ROOM ID</div>
-                <div style={styles.roomIdValue}>{roomId}</div>
-                <div style={styles.roomIdHint}>Share this code with friends to join</div>
+                <div style={styles.roomIdLabel}>TEAMS IN AUCTION</div>
+                <div style={styles.roomIdValue}>{fsTeamsArray.length}</div>
+                <div style={styles.roomIdHint}>Teams participating in this auction</div>
               </div>
 
               {/* Players List */}
               <div style={styles.playersSection}>
                 <div style={styles.playersHeader}>
                   <span style={styles.playersIcon}>👥</span>
-                  <span style={styles.playersTitle}>Players ({connectedUsers.length})</span>
+                  <span style={styles.playersTitle}>Teams ({fsTeamsArray.length})</span>
                 </div>
                 <div style={styles.playersList}>
-                  {connectedUsers.map((u, index) => (
-                    <div key={u.id} style={styles.playerCard}>
-                      <div style={styles.playerAvatar}>{u.name.charAt(0).toUpperCase()}</div>
+                  {fsTeamsArray.map((t, index) => (
+                    <div key={t.name} style={styles.playerCard}>
+                      <div style={styles.playerAvatar}>{t.name.charAt(0).toUpperCase()}</div>
                       <div style={styles.playerInfo}>
-                        <div style={styles.playerName}>{u.name}</div>
-                        <div style={styles.playerTeam}>{u.team}</div>
+                        <div style={styles.playerName}>{t.name}</div>
+                        <div style={styles.playerTeam}>Purse: ₹{t.budget} Cr</div>
                       </div>
-                      {index === 0 && <div style={styles.hostBadge}>HOST</div>}
                     </div>
                   ))}
                 </div>
@@ -769,17 +751,10 @@ export default function App() {
 
               {/* Waiting Message */}
               <div style={styles.waitingSection}>
-                {isHost ? (
-                  <div style={styles.hostMessage}>
-                    <div style={styles.waitingText}>Waiting for players to join...</div>
-                    <div style={styles.playerCount}>{connectedUsers.length} player{connectedUsers.length !== 1 ? 's' : ''} connected</div>
-                  </div>
-                ) : (
-                  <div style={styles.guestMessage}>
-                    <div style={styles.waitingText}>Waiting for host to start...</div>
-                    <div style={styles.successBadge}>✓ Joined successfully</div>
-                  </div>
-                )}
+                <div style={styles.hostMessage}>
+                  <div style={styles.waitingText}>Waiting for all teams to join...</div>
+                  <div style={styles.playerCount}>{fsTeamsArray.length} team{fsTeamsArray.length !== 1 ? 's' : ''} joined</div>
+                </div>
               </div>
 
               {/* Action Button */}
@@ -787,7 +762,7 @@ export default function App() {
                 <button 
                   style={styles.startAuctionBtn}
                   onClick={startMultiplayerAuction}
-                  disabled={connectedUsers.length < 1}
+                  disabled={fsTeamsArray.length < 1}
                 >
                   <span style={styles.startAuctionIcon}>▶</span>
                   Start Auction
@@ -876,7 +851,7 @@ export default function App() {
         <div style={styles.leftPanel}>
           <h3 style={styles.panelTitle}>💰 Team Purses</h3>
           <div style={styles.teamsList}>
-            {(isMultiplayer ? mpTeams : teams).map((t) => (
+            {(isMultiplayer ? fsTeamsArray : teams).map((t) => (
               <div
                 key={t.name}
                 style={{
@@ -921,16 +896,16 @@ export default function App() {
             style={{
               ...styles.currentBidder,
               background: highest
-                ? `linear-gradient(135deg, ${(isMultiplayer ? mpTeams : teams).find((t) => t.name === highest)?.color.primary}40, transparent)`
+                ? `linear-gradient(135deg, ${(isMultiplayer ? fsTeamsArray : teams).find((t) => t.name === highest)?.color.primary}40, transparent)`
                 : "rgba(255,255,255,0.05)",
-              border: highest ? `2px solid ${(isMultiplayer ? mpTeams : teams).find((t) => t.name === highest)?.color.primary}` : "2px solid transparent",
+              border: highest ? `2px solid ${(isMultiplayer ? fsTeamsArray : teams).find((t) => t.name === highest)?.color.primary}` : "2px solid transparent",
             }}
           >
             <span style={styles.currentBidderLabel}>Current Highest Bidder</span>
             <span
               style={{
                 ...styles.currentBidderName,
-                color: highest ? (isMultiplayer ? mpTeams : teams).find((t) => t.name === highest)?.color.primary : "#888",
+                color: highest ? (isMultiplayer ? fsTeamsArray : teams).find((t) => t.name === highest)?.color.primary : "#888",
               }}
             >
               {highest || "Waiting for bids..."}
@@ -974,7 +949,7 @@ export default function App() {
           </div>
 
           {/* Highest Bidder Message */}
-          {highest === team && (
+          {fsAuction?.highestBidderId && fsAuction.highestBidderId === fsUserId && (
             <div style={styles.highestBidderMessage}>
               ✓ You are currently the highest bidder
             </div>
@@ -1115,7 +1090,7 @@ export default function App() {
         <div style={styles.rightPanel}>
           <h3 style={styles.panelTitle}>👥 Squads</h3>
           <div style={styles.squadsList}>
-            {(isMultiplayer ? mpTeams : teams).map((t) => (
+            {(isMultiplayer ? fsTeamsArray : teams).map((t) => (
               <div key={t.name} style={styles.squadItem}>
                 <div
                   style={{
