@@ -352,7 +352,7 @@ export default function App() {
       return;
     }
 
-    // Play warning sound when timer reaches 5 seconds
+    // Play warning sound when timer reaches 5 seconds //
     if (timer === 5) {
       playTimerWarning();
     }
