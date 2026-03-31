@@ -1,8 +1,12 @@
 // 🏏 PROFESSIONAL IPL AUCTION SIMULATION
-// Features: Modern UI, animations, real-time updates, error handling
+// Features: Modern UI, animations, real-time updates, error handling, MULTIPLAYER
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { io } from "socket.io-client";
 import playersData from "./data/players";
+
+// Socket.IO connection
+const SOCKET_URL = 'http://localhost:3001';
 
 // Team color schemes for professional look
 const TEAM_COLORS = {
@@ -64,6 +68,17 @@ export default function App() {
   const [activeTeam, setActiveTeam] = useState(null);
   const [bidHistory, setBidHistory] = useState([]);
   const [soldPlayers, setSoldPlayers] = useState([]);
+  
+  // Multiplayer state
+  const [isMultiplayer, setIsMultiplayer] = useState(false);
+  const [socket, setSocket] = useState(null);
+  const [roomId, setRoomId] = useState(null);
+  const [connectedUsers, setConnectedUsers] = useState([]);
+  const [isHost, setIsHost] = useState(false);
+  const [userName, setUserName] = useState("");
+  const [joinRoomId, setJoinRoomId] = useState("");
+  const [isConnected, setIsConnected] = useState(false);
+  const [mpTeams, setMpTeams] = useState([]); // Dynamic teams for multiplayer
 
   const [teams, setTeams] = useState([
     { name: "RCB", budget: 100, squad: [], color: TEAM_COLORS.RCB, isAI: true },
@@ -82,6 +97,116 @@ export default function App() {
   const bidSound = useRef(new Audio("https://www.soundjay.com/misc/sounds/tink-2.mp3"));
   const soldSound = useRef(new Audio("https://www.soundjay.com/misc/sounds/bell-ringing-01.mp3"));
   const timerWarningSound = useRef(new Audio("https://www.soundjay.com/buttons/sounds/button-3.mp3"));
+
+  // Initialize socket connection for multiplayer
+  useEffect(() => {
+    console.log('[Socket] Initializing connection to', SOCKET_URL);
+    
+    const newSocket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      timeout: 10000,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
+
+    newSocket.on('connect', () => {
+      console.log('[Socket] ✅ Connected to server successfully');
+      console.log('[Socket] Socket ID:', newSocket.id);
+      setIsConnected(true);
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('[Socket] ❌ Connection error:', error.message);
+      console.log('[Socket] Is backend server running on port 3001?');
+      setIsConnected(false);
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('[Socket] ⚠️ Disconnected:', reason);
+      setIsConnected(false);
+    });
+
+    newSocket.on('reconnect_attempt', (attempt) => {
+      console.log('[Socket] Reconnection attempt', attempt);
+    });
+
+    newSocket.on('newBid', (data) => {
+      console.log('[Socket] New bid received:', data);
+      setBid(data.bid);
+      setHighest(data.team);
+      setTimer(15);
+      setBidAnimation(true);
+      setTimeout(() => setBidAnimation(false), 300);
+      
+      // Use server-provided bid history for synchronization
+      if (data.bidHistory) {
+        console.log('[Socket] Syncing bid history from server:', data.bidHistory.length, 'entries');
+        setBidHistory(data.bidHistory.map(bid => ({
+          id: bid.id,
+          team: bid.team,
+          player: bid.player,
+          amount: bid.amount,
+          increment: bid.increment,
+          time: new Date(bid.timestamp).toLocaleTimeString()
+        })));
+      }
+      
+      playBid();
+    });
+
+    newSocket.on('playerSold', (data) => {
+      console.log('[Socket] Player sold:', data);
+    });
+
+    // Room events
+    newSocket.on('roomCreated', (data) => {
+      console.log('[Socket] Room created:', data.roomId);
+      setRoomId(data.roomId);
+      setIsHost(true);
+      setIsMultiplayer(true);
+      setConnectedUsers([data.user]);
+      // Create team for host in multiplayer
+      if (data.teams) {
+        setMpTeams(data.teams);
+      } else {
+        setMpTeams([{
+          name: userName,
+          budget: 100,
+          squad: [],
+          color: '#00d4ff',
+          isAI: false
+        }]);
+      }
+    });
+
+    newSocket.on('roomJoined', (data) => {
+      console.log('[Socket] Joined room:', data.roomId);
+      setRoomId(data.roomId);
+      setIsHost(false);
+      setIsMultiplayer(true);
+      setConnectedUsers(data.users);
+      // Use teams from server
+      if (data.teams) {
+        setMpTeams(data.teams);
+      }
+    });
+
+    newSocket.on('userJoined', (data) => {
+      console.log('[Socket] User joined:', data.user.name);
+      setConnectedUsers(data.users);
+      // Update teams when new user joins
+      if (data.teams) {
+        setMpTeams(data.teams);
+      }
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      console.log('[Socket] Cleaning up socket connection');
+      newSocket.close();
+    };
+  }, []);
 
   const playBid = () => {
     bidSound.current.volume = 0.3;
@@ -107,9 +232,16 @@ export default function App() {
     console.log("[AUCTION] Auction started:", started);
     console.log("[AUCTION] User team:", team);
     console.log("[AUCTION] All teams:", teams.map(t => ({ name: t.name, isAI: t.isAI })));
+    console.log("[AUCTION] Is Multiplayer:", isMultiplayer);
     
     if (!started) {
       console.log("[AUCTION] Not started yet, skipping AI init");
+      return;
+    }
+    
+    // Skip AI in multiplayer mode - only human players
+    if (isMultiplayer) {
+      console.log("[AI] Multiplayer mode detected - AI bidding DISABLED");
       return;
     }
     
@@ -169,12 +301,14 @@ export default function App() {
         if (incrementRoll > 0.90) increment = 1.00;
         else if (incrementRoll > 0.70) increment = 0.50;
         
-        // Use functional update to get latest bid value
-        setBid(prevBid => {
-          const newBid = +(prevBid + increment).toFixed(2);
-          console.log("[AI] Bid updated from", prevBid, "to", newBid, "(+" + increment + ")");
-          return newBid;
-        });
+        // Calculate new bid value first
+        const currentBid = bid;
+        const newBid = +(currentBid + increment).toFixed(2);
+        
+        console.log("[AI] Bid updated from", currentBid, "to", newBid, "(+" + increment + ")");
+        
+        // Update state
+        setBid(newBid);
         setHighest(bidder.name);
         setTimer(15);
         setActiveTeam(bidder.name);
@@ -185,7 +319,7 @@ export default function App() {
           id: Date.now(),
           team: bidder.name,
           player: current.name,
-          amount: bid + increment, // Calculate based on current bid
+          amount: newBid,
           increment: increment,
           time: new Date().toLocaleTimeString()
         }, ...prev].slice(0, 10));
@@ -208,7 +342,7 @@ export default function App() {
       console.log("[AI] Stopping AI bidding loop");
       clearInterval(aiInterval);
     };
-  }, [started]); // Only re-run when started changes
+  }, [started, isMultiplayer]); // Re-run when started or multiplayer mode changes
 
   // Timer Logic
   useEffect(() => {
@@ -245,37 +379,43 @@ export default function App() {
   };
 
   const userBid = (increment) => {
-    const nextBid = getNextBid(bid, increment);
+    const currentBid = bid;
+    const newBid = +(currentBid + increment).toFixed(2);
     
     // Check if user is already highest bidder
     if (highest === team) {
-      showError("You are currently the highest bidder!");
+      showError("You are already the highest bidder!");
       return;
     }
     
-    if (!canBid(nextBid)) {
-      if (userTeamData?.budget < nextBid) {
-        showError("Insufficient purse balance!");
-      } else if (withdrawn.includes(team)) {
-        showError("Your team has withdrawn from this bid!");
-      }
+    // Check if user has enough budget
+    const userTeam = teams.find((t) => t.name === team);
+    if (!userTeam || userTeam.budget < newBid) {
+      showError("Insufficient budget for this bid!");
       return;
     }
     
-    setBid(nextBid);
+    console.log("[USER BID]", team, "bids", newBid, "(+" + increment + "Cr)");
+    
+    setBid(newBid);
     setHighest(team);
     setTimer(15);
     setBidAnimation(true);
     setTimeout(() => setBidAnimation(false), 300);
+    
+    // Emit socket event for multiplayer
+    if (isMultiplayer && socket) {
+      socket.emit('placeBid', { roomId, bid: newBid, team, increment });
+    }
     
     // Add to bid history
     setBidHistory(prev => [{
       id: Date.now(),
       team: team,
       player: current.name,
-      amount: nextBid,
+      amount: newBid,
       increment: increment,
-      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      time: new Date().toLocaleTimeString()
     }, ...prev].slice(0, 10));
     
     playBid();
@@ -371,6 +511,88 @@ export default function App() {
     setNewTeam("");
   };
 
+  // Multiplayer room management
+  const createRoom = () => {
+    console.log("[CREATE ROOM] ========== BUTTON CLICKED ==========");
+    console.log("[CREATE ROOM] userName:", userName);
+    console.log("[CREATE ROOM] socket connected:", socket?.connected);
+    
+    if (!userName.trim()) {
+      console.log("[CREATE ROOM] ❌ Validation failed - no username");
+      showError("Please enter your name");
+      return;
+    }
+    
+    if (!socket) {
+      console.log("[CREATE ROOM] ❌ Socket not initialized");
+      showError("Connection not ready. Please wait...");
+      return;
+    }
+    
+    if (!socket.connected) {
+      console.log("[CREATE ROOM] ❌ Socket not connected");
+      showError("Not connected to server. Is backend running?");
+      return;
+    }
+    
+    console.log("[CREATE ROOM] ✅ All validations passed");
+    console.log("[CREATE ROOM] Emitting 'createRoom' event with:", { name: userName, team: userName });
+    
+    // Use userName as team name in multiplayer
+    socket.emit('createRoom', { name: userName, team: userName });
+    
+    console.log("[CREATE ROOM] Event emitted. Waiting for 'roomCreated' response...");
+  };
+
+  const joinRoom = (roomCode) => {
+    console.log("[JOIN ROOM] ========== BUTTON CLICKED ==========");
+    console.log("[JOIN ROOM] roomCode:", roomCode);
+    console.log("[JOIN ROOM] userName:", userName);
+    
+    if (!userName.trim()) {
+      console.log("[JOIN ROOM] ❌ Validation failed - no username");
+      showError("Please enter your name");
+      return;
+    }
+    
+    if (!roomCode || !roomCode.trim()) {
+      console.log("[JOIN ROOM] ❌ Validation failed - no room code");
+      showError("Please enter a room ID");
+      return;
+    }
+    
+    if (!socket) {
+      console.log("[JOIN ROOM] ❌ Socket not initialized");
+      showError("Connection not ready. Please wait...");
+      return;
+    }
+    
+    if (!socket.connected) {
+      console.log("[JOIN ROOM] ❌ Socket not connected");
+      showError("Not connected to server. Is backend running?");
+      return;
+    }
+    
+    console.log("[JOIN ROOM] ✅ All validations passed");
+    console.log("[JOIN ROOM] Emitting 'joinRoom' event with:", { roomId: roomCode.toUpperCase(), userData: { name: userName, team: userName } });
+    
+    // Use userName as team name in multiplayer
+    socket.emit('joinRoom', { roomId: roomCode.toUpperCase(), userData: { name: userName, team: userName } });
+    
+    console.log("[JOIN ROOM] Event emitted. Waiting for 'roomJoined' response...");
+  };
+
+  const startMultiplayerAuction = () => {
+    if (socket && roomId) {
+      socket.emit('startAuction', { 
+        player: current,
+        basePrice: current.price,
+        roomId 
+      });
+      setStarted(true);
+    }
+  };
+
   const avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${current.name}&backgroundColor=gold`;
 
   // TEAM SELECTION SCREEN
@@ -422,17 +644,171 @@ export default function App() {
 
         {error && <div style={styles.errorMessage}>{error}</div>}
 
+        {/* Multiplayer Section - Premium UI */}
+        <div style={styles.multiplayerCard}>
+          <div style={styles.multiplayerHeader}>
+            <h3 style={styles.multiplayerTitle}>🌐 Multiplayer</h3>
+            <p style={styles.multiplayerSubtitle}>Play with friends in real-time</p>
+            <div style={styles.connectionStatus}>
+              {isConnected ? (
+                <span style={styles.statusConnected}>🟢 Connected</span>
+              ) : (
+                <span style={styles.statusDisconnected}>🔴 Disconnected - Start backend server</span>
+              )}
+            </div>
+          </div>
+          
+          <input
+            style={styles.mpNameInput}
+            placeholder="Enter your name..."
+            value={userName}
+            onChange={(e) => setUserName(e.target.value)}
+          />
+
+          {!isMultiplayer ? (
+            <div style={styles.mpOptionsContainer}>
+              {/* Create Room Section */}
+              <div style={styles.mpOptionCard}>
+                <div style={styles.mpOptionIcon}>🏠</div>
+                <div style={styles.mpOptionTitle}>Create Room</div>
+                <div style={styles.mpOptionDesc}>Start a new auction room</div>
+                <button 
+                  style={{
+                    ...styles.mpPrimaryButton,
+                    opacity: !userName ? 0.5 : 1,
+                    cursor: !userName ? "not-allowed" : "pointer",
+                    pointerEvents: "auto",
+                  }}
+                  onClick={createRoom}
+                  disabled={!userName}
+                >
+                  <span style={styles.mpButtonIcon}>+</span>
+                  Create Room
+                </button>
+              </div>
+
+              {/* OR Divider */}
+              <div style={styles.mpOrDivider}>
+                <span style={styles.mpOrLine}></span>
+                <span style={styles.mpOrText}>OR</span>
+                <span style={styles.mpOrLine}></span>
+              </div>
+
+              {/* Join Room Section */}
+              <div style={styles.mpOptionCard}>
+                <div style={styles.mpOptionIcon}>🔗</div>
+                <div style={styles.mpOptionTitle}>Join Room</div>
+                <div style={styles.mpOptionDesc}>Enter a room ID to join</div>
+                <div style={styles.mpJoinRow}>
+                  <input
+                    style={styles.mpRoomInput}
+                    placeholder="Room ID"
+                    value={joinRoomId}
+                    onChange={(e) => setJoinRoomId(e.target.value.toUpperCase())}
+                    maxLength={6}
+                  />
+                  <button
+                    style={{
+                      ...styles.mpSecondaryButton,
+                      opacity: !userName || !joinRoomId ? 0.5 : 1,
+                      cursor: !userName || !joinRoomId ? "not-allowed" : "pointer",
+                    }}
+                    onClick={() => joinRoom(joinRoomId)}
+                    disabled={!userName || !joinRoomId}
+                  >
+                    Join
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div style={styles.lobbyCard}>
+              {/* Lobby Header */}
+              <div style={styles.lobbyHeader}>
+                <div style={styles.lobbyIcon}>🎮</div>
+                <h3 style={styles.lobbyTitle}>Game Lobby</h3>
+                <div style={styles.connectionStatus}>
+                  {isConnected ? (
+                    <span style={styles.statusConnected}>🟢 Connected</span>
+                  ) : (
+                    <span style={styles.statusDisconnected}>🔴 Disconnected</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Room ID Display */}
+              <div style={styles.roomIdContainer}>
+                <div style={styles.roomIdLabel}>ROOM ID</div>
+                <div style={styles.roomIdValue}>{roomId}</div>
+                <div style={styles.roomIdHint}>Share this code with friends to join</div>
+              </div>
+
+              {/* Players List */}
+              <div style={styles.playersSection}>
+                <div style={styles.playersHeader}>
+                  <span style={styles.playersIcon}>👥</span>
+                  <span style={styles.playersTitle}>Players ({connectedUsers.length})</span>
+                </div>
+                <div style={styles.playersList}>
+                  {connectedUsers.map((u, index) => (
+                    <div key={u.id} style={styles.playerCard}>
+                      <div style={styles.playerAvatar}>{u.name.charAt(0).toUpperCase()}</div>
+                      <div style={styles.playerInfo}>
+                        <div style={styles.playerName}>{u.name}</div>
+                        <div style={styles.playerTeam}>{u.team}</div>
+                      </div>
+                      {index === 0 && <div style={styles.hostBadge}>HOST</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Waiting Message */}
+              <div style={styles.waitingSection}>
+                {isHost ? (
+                  <div style={styles.hostMessage}>
+                    <div style={styles.waitingText}>Waiting for players to join...</div>
+                    <div style={styles.playerCount}>{connectedUsers.length} player{connectedUsers.length !== 1 ? 's' : ''} connected</div>
+                  </div>
+                ) : (
+                  <div style={styles.guestMessage}>
+                    <div style={styles.waitingText}>Waiting for host to start...</div>
+                    <div style={styles.successBadge}>✓ Joined successfully</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Button */}
+              {isHost ? (
+                <button 
+                  style={styles.startAuctionBtn}
+                  onClick={startMultiplayerAuction}
+                  disabled={connectedUsers.length < 1}
+                >
+                  <span style={styles.startAuctionIcon}>▶</span>
+                  Start Auction
+                </button>
+              ) : (
+                <div style={styles.guestWaitingBtn}>
+                  <span style={styles.pulseDot}></span>
+                  Waiting for host...
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <button
           disabled={!team}
           onClick={() => setStarted(true)}
           style={{
-            ...styles.enterAuctionBtn,
+            ...styles.singlePlayerBtn,
             opacity: team ? 1 : 0.5,
             cursor: team ? "pointer" : "not-allowed",
           }}
         >
-          <span style={styles.enterAuctionText}>ENTER AUCTION</span>
-          <span style={styles.enterAuctionArrow}>→</span>
+          <span style={styles.singlePlayerText}>Single Player</span>
+          <span style={styles.singlePlayerArrow}>→</span>
         </button>
       </div>
     );
@@ -496,7 +872,7 @@ export default function App() {
         <div style={styles.leftPanel}>
           <h3 style={styles.panelTitle}>💰 Team Purses</h3>
           <div style={styles.teamsList}>
-            {teams.map((t) => (
+            {(isMultiplayer ? mpTeams : teams).map((t) => (
               <div
                 key={t.name}
                 style={{
@@ -513,7 +889,7 @@ export default function App() {
                 <div style={styles.teamItemHeader}>
                   <span style={{ ...styles.teamName, color: t.color.primary }}>
                     {t.name}
-                    {t.name !== team && (
+                    {(!isMultiplayer && t.name !== team) && (
                       <span style={styles.aiBadge}>🤖 AI</span>
                     )}
                   </span>
@@ -541,16 +917,16 @@ export default function App() {
             style={{
               ...styles.currentBidder,
               background: highest
-                ? `linear-gradient(135deg, ${teams.find((t) => t.name === highest)?.color.primary}40, transparent)`
+                ? `linear-gradient(135deg, ${(isMultiplayer ? mpTeams : teams).find((t) => t.name === highest)?.color.primary}40, transparent)`
                 : "rgba(255,255,255,0.05)",
-              border: highest ? `2px solid ${teams.find((t) => t.name === highest)?.color.primary}` : "2px solid transparent",
+              border: highest ? `2px solid ${(isMultiplayer ? mpTeams : teams).find((t) => t.name === highest)?.color.primary}` : "2px solid transparent",
             }}
           >
             <span style={styles.currentBidderLabel}>Current Highest Bidder</span>
             <span
               style={{
                 ...styles.currentBidderName,
-                color: highest ? teams.find((t) => t.name === highest)?.color.primary : "#888",
+                color: highest ? (isMultiplayer ? mpTeams : teams).find((t) => t.name === highest)?.color.primary : "#888",
               }}
             >
               {highest || "Waiting for bids..."}
@@ -735,7 +1111,7 @@ export default function App() {
         <div style={styles.rightPanel}>
           <h3 style={styles.panelTitle}>👥 Squads</h3>
           <div style={styles.squadsList}>
-            {teams.map((t) => (
+            {(isMultiplayer ? mpTeams : teams).map((t) => (
               <div key={t.name} style={styles.squadItem}>
                 <div
                   style={{
@@ -1167,14 +1543,6 @@ const styles = {
     color: "rgba(255,255,255,0.5)",
     marginTop: "5px",
   },
-  timer: {
-    fontSize: "32px",
-    fontWeight: "bold",
-    padding: "10px 30px",
-    background: "rgba(0,0,0,0.3)",
-    borderRadius: "12px",
-    transition: "all 0.3s ease",
-  },
   actionButtons: {
     display: "flex",
     gap: "15px",
@@ -1407,5 +1775,374 @@ const styles = {
   playerPrice: {
     color: "#FFD700",
     fontSize: "11px",
+  },
+  // Premium Multiplayer Styles
+  multiplayerCard: {
+    background: "rgba(255, 255, 255, 0.05)",
+    backdropFilter: "blur(20px)",
+    borderRadius: "24px",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05)",
+    padding: "40px",
+    margin: "30px auto",
+    maxWidth: "600px",
+    width: "90%",
+    textAlign: "center",
+  },
+  multiplayerHeader: {
+    marginBottom: "30px",
+  },
+  multiplayerTitle: {
+    fontSize: "28px",
+    fontWeight: "bold",
+    background: "linear-gradient(135deg, #00d4ff, #7b2cbf)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    margin: "0 0 8px 0",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "10px",
+  },
+  multiplayerSubtitle: {
+    fontSize: "14px",
+    color: "rgba(255, 255, 255, 0.5)",
+    margin: 0,
+  },
+  mpNameInput: {
+    width: "100%",
+    maxWidth: "320px",
+    padding: "16px 20px",
+    fontSize: "16px",
+    borderRadius: "12px",
+    border: "2px solid rgba(255, 255, 255, 0.1)",
+    background: "rgba(0, 0, 0, 0.2)",
+    color: "#fff",
+    textAlign: "center",
+    marginBottom: "30px",
+    outline: "none",
+  },
+  mpOptionsContainer: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+    alignItems: "center",
+  },
+  mpOptionCard: {
+    background: "rgba(255, 255, 255, 0.03)",
+    borderRadius: "16px",
+    padding: "30px",
+    width: "100%",
+    maxWidth: "400px",
+    border: "1px solid rgba(255, 255, 255, 0.05)",
+  },
+  mpOptionIcon: {
+    fontSize: "40px",
+    marginBottom: "15px",
+  },
+  mpOptionTitle: {
+    fontSize: "18px",
+    fontWeight: "bold",
+    color: "#fff",
+    marginBottom: "8px",
+  },
+  mpOptionDesc: {
+    fontSize: "13px",
+    color: "rgba(255, 255, 255, 0.5)",
+    marginBottom: "20px",
+  },
+  mpPrimaryButton: {
+    width: "100%",
+    padding: "16px 32px",
+    fontSize: "16px",
+    fontWeight: "bold",
+    borderRadius: "12px",
+    border: "none",
+    background: "linear-gradient(135deg, #00d4ff, #7b2cbf)",
+    color: "#fff",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    boxShadow: "0 4px 15px rgba(0, 212, 255, 0.3)",
+  },
+  mpSecondaryButton: {
+    padding: "14px 28px",
+    fontSize: "15px",
+    fontWeight: "bold",
+    borderRadius: "10px",
+    border: "2px solid rgba(0, 212, 255, 0.5)",
+    background: "transparent",
+    color: "#00d4ff",
+    cursor: "pointer",
+  },
+  mpButtonIcon: {
+    fontSize: "20px",
+  },
+  mpOrDivider: {
+    display: "flex",
+    alignItems: "center",
+    gap: "15px",
+    width: "100%",
+    maxWidth: "400px",
+    margin: "10px 0",
+  },
+  mpOrLine: {
+    flex: 1,
+    height: "1px",
+    background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent)",
+  },
+  mpOrText: {
+    fontSize: "12px",
+    color: "rgba(255, 255, 255, 0.4)",
+    fontWeight: "bold",
+    textTransform: "uppercase",
+    letterSpacing: "2px",
+  },
+  mpJoinRow: {
+    display: "flex",
+    gap: "10px",
+    alignItems: "center",
+  },
+  mpRoomInput: {
+    flex: 1,
+    padding: "14px 16px",
+    fontSize: "15px",
+    borderRadius: "10px",
+    border: "2px solid rgba(255, 255, 255, 0.1)",
+    background: "rgba(0, 0, 0, 0.2)",
+    color: "#fff",
+    textAlign: "center",
+    outline: "none",
+    textTransform: "uppercase",
+  },
+  singlePlayerBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "10px",
+    padding: "14px 32px",
+    fontSize: "14px",
+    borderRadius: "50px",
+    border: "2px solid rgba(255, 255, 255, 0.2)",
+    background: "transparent",
+    color: "rgba(255, 255, 255, 0.7)",
+    cursor: "pointer",
+    margin: "20px auto",
+  },
+  singlePlayerText: {
+    fontWeight: "500",
+  },
+  singlePlayerArrow: {
+    fontSize: "16px",
+  },
+  // Modern Lobby Styles
+  lobbyCard: {
+    background: "rgba(255, 255, 255, 0.05)",
+    backdropFilter: "blur(20px)",
+    borderRadius: "24px",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05)",
+    padding: "40px",
+    width: "100%",
+    maxWidth: "500px",
+    margin: "0 auto",
+    textAlign: "center",
+  },
+  lobbyHeader: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "10px",
+    marginBottom: "30px",
+  },
+  lobbyIcon: {
+    fontSize: "48px",
+    marginBottom: "5px",
+  },
+  lobbyTitle: {
+    fontSize: "24px",
+    fontWeight: "bold",
+    color: "#fff",
+    margin: 0,
+  },
+  connectionStatus: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    fontSize: "12px",
+    marginTop: "5px",
+  },
+  statusConnected: {
+    color: "#4ade80",
+  },
+  statusDisconnected: {
+    color: "#f87171",
+  },
+  roomIdContainer: {
+    background: "rgba(0, 0, 0, 0.3)",
+    borderRadius: "16px",
+    padding: "20px",
+    marginBottom: "25px",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+  },
+  roomIdLabel: {
+    fontSize: "11px",
+    fontWeight: "bold",
+    color: "rgba(255, 255, 255, 0.5)",
+    letterSpacing: "2px",
+    marginBottom: "8px",
+  },
+  roomIdValue: {
+    fontSize: "32px",
+    fontWeight: "bold",
+    color: "#00d4ff",
+    fontFamily: "monospace",
+    letterSpacing: "4px",
+    marginBottom: "8px",
+  },
+  roomIdHint: {
+    fontSize: "12px",
+    color: "rgba(255, 255, 255, 0.4)",
+  },
+  playersSection: {
+    marginBottom: "25px",
+  },
+  playersHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "14px",
+    color: "rgba(255, 255, 255, 0.7)",
+    marginBottom: "15px",
+    paddingLeft: "5px",
+  },
+  playersIcon: {
+    fontSize: "16px",
+  },
+  playersTitle: {
+    fontWeight: "500",
+  },
+  playersList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  },
+  playerCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    background: "rgba(255, 255, 255, 0.05)",
+    borderRadius: "12px",
+    padding: "12px 16px",
+    border: "1px solid rgba(255, 255, 255, 0.05)",
+  },
+  playerAvatar: {
+    width: "40px",
+    height: "40px",
+    borderRadius: "50%",
+    background: "linear-gradient(135deg, #00d4ff, #7b2cbf)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "18px",
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  playerInfo: {
+    flex: 1,
+    textAlign: "left",
+  },
+  playerName: {
+    fontSize: "14px",
+    fontWeight: "600",
+    color: "#fff",
+  },
+  playerTeam: {
+    fontSize: "12px",
+    color: "rgba(255, 255, 255, 0.5)",
+  },
+  hostBadge: {
+    background: "linear-gradient(135deg, #fbbf24, #f59e0b)",
+    color: "#000",
+    fontSize: "10px",
+    fontWeight: "bold",
+    padding: "4px 10px",
+    borderRadius: "20px",
+    letterSpacing: "1px",
+  },
+  waitingSection: {
+    marginBottom: "25px",
+  },
+  hostMessage: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  guestMessage: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  waitingText: {
+    fontSize: "14px",
+    color: "rgba(255, 255, 255, 0.6)",
+  },
+  playerCount: {
+    fontSize: "12px",
+    color: "rgba(255, 255, 255, 0.4)",
+  },
+  successBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    background: "rgba(74, 222, 128, 0.2)",
+    color: "#4ade80",
+    fontSize: "13px",
+    fontWeight: "500",
+    padding: "8px 16px",
+    borderRadius: "20px",
+    marginTop: "5px",
+  },
+  startAuctionBtn: {
+    width: "100%",
+    padding: "16px 32px",
+    fontSize: "16px",
+    fontWeight: "bold",
+    borderRadius: "12px",
+    border: "none",
+    background: "linear-gradient(135deg, #00d4ff, #7b2cbf)",
+    color: "#fff",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "10px",
+    boxShadow: "0 4px 15px rgba(0, 212, 255, 0.3)",
+    transition: "all 0.3s ease",
+    opacity: 1,
+  },
+  startAuctionIcon: {
+    fontSize: "18px",
+  },
+  guestWaitingBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "10px",
+    padding: "16px",
+    fontSize: "14px",
+    color: "rgba(255, 255, 255, 0.5)",
+    background: "rgba(255, 255, 255, 0.05)",
+    borderRadius: "12px",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+  },
+  pulseDot: {
+    width: "8px",
+    height: "8px",
+    background: "#00d4ff",
+    borderRadius: "50%",
+    animation: "pulse 1.5s infinite",
   },
 };
