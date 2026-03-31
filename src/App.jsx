@@ -24,6 +24,8 @@ const TEAM_COLORS = {
   LSG: { primary: "#0047AB", secondary: "#FF7F00", accent: "#FFD700" },
 };
 
+
+
 // Animation keyframes as CSS-in-JS
 const animations = `
 @keyframes pulse {
