@@ -192,10 +192,10 @@ export default function App() {
     console.log("[AI] User team:", team);
     console.log("[AI] AI teams:", teams.filter(t => t.isAI && t.name !== team).map(t => t.name));
     
-    // AI Bidding with random delay (simulates real auction behavior)
+    // AI Bidding with realistic IPL auction behavior
     const scheduleNextBid = () => {
-      // Random delay between 1.5s and 4s
-      const delay = 1500 + Math.random() * 2500;
+      // Random delay between 1s and 3s (realistic auction timing)
+      const delay = 1000 + Math.random() * 2000;
       
       return setTimeout(() => {
         // Use refs to get latest state values (avoid stale closures)
@@ -211,18 +211,51 @@ export default function App() {
           return;
         }
         
+        // Skip if no player data available
+        if (!currentPlayer) {
+          scheduleNextBid();
+          return;
+        }
+        
         // Calculate next bid based on latest current bid
         const nextBid = +(currentBid + 0.25).toFixed(2);
         
-        // Get eligible AI teams (exclude if already highest bidder)
+        // Get eligible AI teams with realistic IPL auction logic
         const eligibleTeams = currentTeams.filter(t => {
           const isAI = t.isAI === true;
           const notUser = t.name !== currentTeam;
           const notWithdrawn = !currentWithdrawn.includes(t.name);
-          const canAfford = t.budget >= nextBid;
           const notHighestBidder = t.name !== currentHighest;
           
-          return isAI && notUser && notWithdrawn && canAfford && notHighestBidder;
+          // Budget checks for realistic bidding
+          const canAfford = t.budget >= nextBid;
+          
+          // Keep reserve budget (don't spend everything on one player)
+          // Reserve at least 20Cr or 25% of original budget, whichever is higher
+          const minReserve = Math.max(20, t.budget * 0.25);
+          const hasReserveBudget = (t.budget - nextBid) >= minReserve;
+          
+          // Calculate max bid based on player rating (realistic valuation)
+          // Base price + (rating - 75) * 2Cr as rough guide, max 25Cr over base
+          const playerValue = currentPlayer.price + Math.min(25, Math.max(0, (currentPlayer.rating - 75) * 2));
+          const maxBidLimit = playerValue * 1.3; // 30% margin over estimated value
+          const withinBudgetLimit = nextBid <= maxBidLimit;
+          
+          // Stop bidding if bid exceeds reasonable limit
+          const notOverpriced = nextBid <= maxBidLimit;
+          
+          // AI is more likely to bid on star players (rating > 85)
+          const isStarPlayer = currentPlayer.rating > 85;
+          
+          // For star players, be more aggressive; for average players, be conservative
+          let shouldBid = isAI && notUser && notWithdrawn && canAfford && notHighestBidder && hasReserveBudget && notOverpriced;
+          
+          // Log AI decision making
+          if (isAI && notUser) {
+            console.log(`[AI] ${t.name}: canAfford=${canAfford}, hasReserve=${hasReserveBudget}, withinLimit=${notOverpriced}, isStar=${isStarPlayer}`);
+          }
+          
+          return shouldBid;
         });
         
         if (eligibleTeams.length === 0) {
@@ -231,11 +264,18 @@ export default function App() {
           return;
         }
         
-        // Select random AI team
+        // Select random AI team from eligible
         const bidder = eligibleTeams[Math.floor(Math.random() * eligibleTeams.length)];
         
-        // 75% chance to bid
-        if (Math.random() < 0.75) {
+        // Dynamic bidding probability based on situation
+        // Star players: 80% chance, Regular: 60% chance, Bid wars: reduce chance
+        const isStarPlayer = currentPlayer.rating > 85;
+        const bidWar = currentBid > currentPlayer.price * 3;
+        let bidChance = isStarPlayer ? 0.80 : 0.60;
+        if (bidWar) bidChance *= 0.5; // Reduce chance in bid wars
+        
+        // Sometimes skip bidding (realistic auction behavior)
+        if (Math.random() < bidChance) {
           // Randomly choose increment: 70% +25L, 20% +50L, 10% +1Cr
           const incrementRoll = Math.random();
           let increment = 0.25;
@@ -252,7 +292,7 @@ export default function App() {
             return;
           }
           
-          console.log("[AI] Bid placed:", bidder.name, newBid, "(+", increment, ")");
+          console.log(`[AI] ${bidder.name} bids ${newBid}Cr (+${increment}Cr) on ${currentPlayer.name}`);
           
           // Update global state
           setBid(newBid);
@@ -275,6 +315,8 @@ export default function App() {
           
           setTimeout(() => setBidAnimation(false), 300);
           setTimeout(() => setActiveTeam(null), 1500);
+        } else {
+          console.log(`[AI] ${bidder.name} chose not to bid (random skip)`);
         }
         
         // Schedule next bid attempt
