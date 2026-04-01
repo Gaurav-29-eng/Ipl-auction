@@ -891,6 +891,24 @@ export default function App() {
         </div>
       </div>
 
+      {/* Status Bar - Shows current bidding status */}
+      {highest && (
+        <div style={{
+          ...styles.statusBar,
+          background: highest === team 
+            ? 'linear-gradient(90deg, rgba(0,200,83,0.3), rgba(0,200,83,0.1))' 
+            : 'linear-gradient(90deg, rgba(255,215,0,0.3), rgba(255,215,0,0.1))',
+          borderColor: highest === team ? '#00C853' : '#FFD700',
+        }}>
+          <span style={styles.statusText}>
+            {highest === team 
+              ? `✓ You (${team}) are leading with ₹${bid.toFixed(2)} Cr`
+              : `${highest} is leading with ₹${bid.toFixed(2)} Cr`
+            }
+          </span>
+        </div>
+      )}
+
       {/* Sold Banner */}
       {sold && (
         <div 
@@ -917,102 +935,77 @@ export default function App() {
       {/* Error Toast */}
       {error && <div style={styles.errorToast}>{error}</div>}
 
-      {/* Main Layout */}
-      <div style={styles.mainLayout}>
-        {/* Left Panel - Teams */}
-        <div style={styles.leftPanel}>
-          <h3 style={styles.panelTitle}>💰 Team Purses</h3>
-          <div style={styles.teamsList}>
-            {(isMultiplayer ? fsTeamsArray : teams).map((t) => (
-              <div
-                key={t.name}
-                style={{
-                  ...styles.teamItem,
-                  background: activeTeam === t.name 
-                    ? `linear-gradient(90deg, ${t.color.primary}40, transparent)`
-                    : highest === t.name
-                    ? `linear-gradient(90deg, ${t.color.primary}60, ${t.color.primary}20)`
-                    : "rgba(255,255,255,0.05)",
-                  borderLeft: `4px solid ${t.color.primary}`,
-                  boxShadow: highest === t.name ? `0 0 20px ${t.color.primary}40` : "none",
-                }}
-              >
-                <div style={styles.teamItemHeader}>
-                  <span style={{ ...styles.teamName, color: t.color.primary }}>
-                    {t.name}
-                    {(!isMultiplayer && t.name !== team) && (
-                      <span style={styles.aiBadge}>🤖 AI</span>
-                    )}
-                  </span>
-                  <span style={styles.teamPurse}>₹{t.budget.toFixed(1)}Cr</span>
-                </div>
-                <div style={styles.purseBarBg}>
-                  <div
+      {/* Main 3-Column Layout */}
+      <div style={styles.newMainLayout}>
+        {/* LEFT: Player Info */}
+        <div style={styles.leftColumn}>
+          <h3 style={styles.columnTitle}>� Player</h3>
+          <div style={styles.playerInfoCard}>
+            <div style={styles.playerImageContainer}>
+              <img src={avatar} alt={current.name} style={styles.playerImageLarge} />
+              <div style={styles.playerRatingBadgeLarge}>⭐ {current.rating}</div>
+            </div>
+            <h2 style={styles.playerNameLarge}>{current.name}</h2>
+            <div style={styles.playerRoleBadge}>{current.role}</div>
+            <div style={styles.basePriceBox}>
+              <span style={styles.basePriceLabel}>Base Price</span>
+              <span style={styles.basePriceValue}>₹{current.price} Cr</span>
+            </div>
+          </div>
+
+          {/* Bid History */}
+          <div style={styles.bidHistoryBox}>
+            <h4 style={styles.bidHistoryTitle}>📜 Recent Bids</h4>
+            <div style={styles.bidHistoryList}>
+              {bidHistory.length === 0 ? (
+                <div style={styles.noBidsText}>No bids yet</div>
+              ) : (
+                bidHistory.slice(0, 5).map((bid, i) => (
+                  <div 
+                    key={bid.id} 
                     style={{
-                      ...styles.purseBar,
-                      width: `${t.budget}%`,
-                      background: `linear-gradient(90deg, ${t.color.primary}, ${t.color.secondary})`,
+                      ...styles.bidHistoryItem,
+                      borderLeft: `3px solid ${teams.find(t => t.name === bid.team)?.color.primary || '#666'}`,
+                      background: i === 0 ? 'rgba(255,215,0,0.1)' : 'transparent',
                     }}
-                  />
-                </div>
-                <div style={styles.squadCount}>{t.squad.length} players</div>
-              </div>
-            ))}
+                  >
+                    <span style={styles.bidHistoryTeam}>{bid.team}</span>
+                    <span style={styles.bidHistoryAmount}>₹{bid.amount.toFixed(2)}Cr</span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Center Panel - Player Card */}
-        <div style={styles.centerPanel}>
-          {/* Current Bidder Display */}
-          <div
-            style={{
-              ...styles.currentBidder,
-              background: highest
-                ? `linear-gradient(135deg, ${(isMultiplayer ? fsTeamsArray : teams).find((t) => t.name === highest)?.color.primary}40, transparent)`
-                : "rgba(255,255,255,0.05)",
-              border: highest ? `2px solid ${(isMultiplayer ? fsTeamsArray : teams).find((t) => t.name === highest)?.color.primary}` : "2px solid transparent",
-            }}
-          >
-            <span style={styles.currentBidderLabel}>Current Highest Bidder</span>
-            <span
-              style={{
-                ...styles.currentBidderName,
-                color: highest ? (isMultiplayer ? fsTeamsArray : teams).find((t) => t.name === highest)?.color.primary : "#888",
-              }}
-            >
-              {highest || "Waiting for bids..."}
-            </span>
-          </div>
-
-          {/* Player Card */}
-          <div style={styles.playerCard}>
-            <div style={styles.playerImageContainer}>
-              <img src={avatar} alt={current.name} style={styles.playerImage} />
-              <div style={styles.playerRatingBadge}>⭐ {current.rating}</div>
-            </div>
-            
-            <h2 style={styles.playerName}>{current.name}</h2>
-            <div style={styles.playerRole}>{current.role}</div>
-            
-            <div style={styles.basePrice}>Base Price: ₹{current.price} Cr</div>
-          </div>
-
-          {/* Bid Display */}
-          <div
-            style={{
-              ...styles.bidDisplay,
-              animation: bidAnimation ? "bidIncrease 0.3s ease" : "none",
-            }}
-          >
-            <div style={styles.bidLabel}>Current Bid</div>
-            <div style={styles.bidAmount}>₹{bid.toFixed(2)} Cr</div>
-            <div style={styles.bidIncrement}>Next: +25L / +50L / +1Cr</div>
+        {/* CENTER: Current Bid & Controls */}
+        <div style={styles.centerColumn}>
+          {/* Current Bid Display */}
+          <div style={{
+            ...styles.currentBidBox,
+            boxShadow: highest 
+              ? `0 0 60px ${(isMultiplayer ? fsTeamsArray : teams).find((t) => t.name === highest)?.color.primary}40`
+              : '0 0 60px rgba(255,215,0,0.2)',
+            borderColor: highest 
+              ? (isMultiplayer ? fsTeamsArray : teams).find((t) => t.name === highest)?.color.primary 
+              : '#FFD700',
+          }}>
+            <div style={styles.currentBidLabel}>Current Bid</div>
+            <div style={styles.currentBidAmount}>₹{bid.toFixed(2)} Cr</div>
+            {highest && (
+              <div style={{
+                ...styles.currentBidderTag,
+                color: (isMultiplayer ? fsTeamsArray : teams).find((t) => t.name === highest)?.color.primary,
+              }}>
+                {highest === team ? 'You are leading!' : `${highest} is leading`}
+              </div>
+            )}
           </div>
 
           {/* Timer */}
           <div
             style={{
-              ...styles.timer,
+              ...styles.timerBox,
               animation: timer <= 5 ? "timerPulse 1s infinite" : "none",
               color: timer <= 5 ? "#ff4444" : timer <= 10 ? "#ffaa00" : "#00ff88",
             }}
@@ -1020,173 +1013,128 @@ export default function App() {
             ⏱️ {timer}s
           </div>
 
-          {/* Highest Bidder Message */}
-          {fsAuction?.highestBidderId && fsAuction.highestBidderId === fsUserId && (
-            <div style={styles.highestBidderMessage}>
-              ✓ You are currently the highest bidder
+          {/* Bid Buttons */}
+          <div style={styles.bidButtonsContainer}>
+            <div style={styles.bidButtonsRow}>
+              <button
+                onClick={() => userBid(0.25)}
+                disabled={!canBid(nextBid25L)}
+                style={{
+                  ...styles.bidButton,
+                  opacity: canBid(nextBid25L) ? 1 : 0.4,
+                  cursor: canBid(nextBid25L) ? "pointer" : "not-allowed",
+                  transform: canBid(nextBid25L) ? 'scale(1)' : 'scale(0.95)',
+                }}
+              >
+                <span style={styles.bidBtnValue}>+25L</span>
+                <span style={styles.bidBtnPrice}>₹{nextBid25L.toFixed(2)}Cr</span>
+              </button>
+
+              <button
+                onClick={() => userBid(0.50)}
+                disabled={!canBid(nextBid50L)}
+                style={{
+                  ...styles.bidButton,
+                  ...styles.bidButtonBlue,
+                  opacity: canBid(nextBid50L) ? 1 : 0.4,
+                  cursor: canBid(nextBid50L) ? "pointer" : "not-allowed",
+                  transform: canBid(nextBid50L) ? 'scale(1)' : 'scale(0.95)',
+                }}
+              >
+                <span style={styles.bidBtnValue}>+50L</span>
+                <span style={styles.bidBtnPrice}>₹{nextBid50L.toFixed(2)}Cr</span>
+              </button>
+
+              <button
+                onClick={() => userBid(1.00)}
+                disabled={!canBid(nextBid1Cr)}
+                style={{
+                  ...styles.bidButton,
+                  ...styles.bidButtonPurple,
+                  opacity: canBid(nextBid1Cr) ? 1 : 0.4,
+                  cursor: canBid(nextBid1Cr) ? "pointer" : "not-allowed",
+                  transform: canBid(nextBid1Cr) ? 'scale(1)' : 'scale(0.95)',
+                }}
+              >
+                <span style={styles.bidBtnValue}>+1Cr</span>
+                <span style={styles.bidBtnPrice}>₹{nextBid1Cr.toFixed(2)}Cr</span>
+              </button>
             </div>
-          )}
 
-          {/* Action Buttons */}
-          <div style={styles.actionButtons}>
-            <button
-              onClick={() => userBid(0.25)}
-              disabled={!canBid(nextBid25L)}
-              style={{
-                ...styles.bidBtn,
-                opacity: canBid(nextBid25L) ? 1 : 0.5,
-                cursor: canBid(nextBid25L) ? "pointer" : "not-allowed",
-              }}
-            >
-              <span style={styles.btnIcon}>💰</span>
-              <span>+25L</span>
-            </button>
+            {/* Disabled message if user is highest bidder */}
+            {highest === team && (
+              <div style={styles.disabledMessage}>
+                ✓ You are the highest bidder - waiting for others
+              </div>
+            )}
 
-            <button
-              onClick={() => userBid(0.50)}
-              disabled={!canBid(nextBid50L)}
-              style={{
-                ...styles.bidBtn,
-                opacity: canBid(nextBid50L) ? 1 : 0.5,
-                cursor: canBid(nextBid50L) ? "pointer" : "not-allowed",
-                background: "linear-gradient(135deg, #2196F3, #03A9F4)",
-              }}
-            >
-              <span style={styles.btnIcon}>💰</span>
-              <span>+50L</span>
-            </button>
-
-            <button
-              onClick={() => userBid(1.00)}
-              disabled={!canBid(nextBid1Cr)}
-              style={{
-                ...styles.bidBtn,
-                opacity: canBid(nextBid1Cr) ? 1 : 0.5,
-                cursor: canBid(nextBid1Cr) ? "pointer" : "not-allowed",
-                background: "linear-gradient(135deg, #9C27B0, #E91E63)",
-              }}
-            >
-              <span style={styles.btnIcon}>💰</span>
-              <span>+1Cr</span>
-            </button>
-
-            <button onClick={skip} style={styles.skipBtn}>
-              <span style={styles.btnIcon}>⏭️</span>
-              <span>SKIP</span>
-            </button>
-
-            <button
-              onClick={withdraw}
-              disabled={withdrawn.includes(team) || highest === team}
-              style={{
-                ...styles.withdrawBtn,
-                opacity: withdrawn.includes(team) || highest === team ? 0.5 : 1,
-                cursor: withdrawn.includes(team) || highest === team ? "not-allowed" : "pointer",
-              }}
-            >
-              <span style={styles.btnIcon}>🚫</span>
-              <span>{withdrawn.includes(team) ? "WITHDRAWN" : "WITHDRAW"}</span>
-            </button>
+            {/* Other Actions */}
+            <div style={styles.actionButtonsRow}>
+              <button onClick={skip} style={styles.actionButton}>
+                <span>⏭️</span>
+                <span>Skip</span>
+              </button>
+              <button
+                onClick={withdraw}
+                disabled={withdrawn.includes(team) || highest === team}
+                style={{
+                  ...styles.actionButton,
+                  ...styles.withdrawButton,
+                  opacity: withdrawn.includes(team) || highest === team ? 0.4 : 1,
+                  cursor: withdrawn.includes(team) || highest === team ? "not-allowed" : "pointer",
+                }}
+              >
+                <span>🚫</span>
+                <span>{withdrawn.includes(team) ? "Withdrawn" : "Withdraw"}</span>
+              </button>
+            </div>
           </div>
 
           {/* Withdrawn Teams */}
           {withdrawn.length > 0 && (
-            <div style={styles.withdrawnSection}>
+            <div style={styles.withdrawnBox}>
               <span style={styles.withdrawnLabel}>Withdrawn:</span>
               {withdrawn.map((t) => (
-                <span key={t} style={styles.withdrawnTeam}>{t}</span>
+                <span key={t} style={styles.withdrawnBadge}>{t}</span>
               ))}
             </div>
           )}
         </div>
 
-        {/* Activity Sidebar - Recent Bids & Sold Players */}
-        <div style={styles.activityPanel}>
-          {/* Recent Bids */}
-          <div style={styles.activitySection}>
-            <h3 style={styles.panelTitle}>🔥 Recent Bids</h3>
-            <div style={styles.activityList}>
-              {bidHistory.length === 0 ? (
-                <div style={styles.emptyActivity}>No bids yet</div>
-              ) : (
-                bidHistory.map((bid, i) => (
-                  <div 
-                    key={bid.id} 
-                    style={{
-                      ...styles.bidItem,
-                      borderLeft: `3px solid ${teams.find(t => t.name === bid.team)?.color.primary || '#666'}`,
-                      background: i === 0 ? 'rgba(255,215,0,0.1)' : 'rgba(255,255,255,0.03)',
-                    }}
-                  >
-                    <div style={styles.bidHeader}>
-                      <span style={styles.bidTeam}>{bid.team}</span>
-                      <span style={styles.bidAmount}>₹{bid.amount.toFixed(2)}Cr</span>
-                    </div>
-                    <div style={styles.bidPlayer}>{bid.player}</div>
-                    <div style={styles.bidTime}>{bid.time}</div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Sold Players */}
-          <div style={styles.activitySection}>
-            <h3 style={styles.panelTitle}>✅ Sold Players</h3>
-            <div style={styles.activityList}>
-              {soldPlayers.length === 0 ? (
-                <div style={styles.emptyActivity}>No players sold yet</div>
-              ) : (
-                soldPlayers.map((sold) => (
-                  <div 
-                    key={sold.id} 
-                    style={{
-                      ...styles.soldItem,
-                      borderLeft: `3px solid ${teams.find(t => t.name === sold.team)?.color.primary || '#666'}`,
-                    }}
-                  >
-                    <div style={styles.soldHeader}>
-                      <span style={styles.soldPlayerName}>{sold.player.name}</span>
-                      <span style={styles.soldPlayerPrice}>₹{sold.price.toFixed(2)}Cr</span>
-                    </div>
-                    <div style={styles.soldToTeam}>→ {sold.team}</div>
-                    <div style={styles.soldTime}>{sold.time}</div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Panel - Squads */}
-        <div style={styles.rightPanel}>
-          <h3 style={styles.panelTitle}>👥 Squads</h3>
-          <div style={styles.squadsList}>
+        {/* RIGHT: All Teams */}
+        <div style={styles.rightColumn}>
+          <h3 style={styles.columnTitle}>🏏 Teams</h3>
+          <div style={styles.teamsGrid}>
             {(isMultiplayer ? fsTeamsArray : teams).map((t) => (
-              <div key={t.name} style={styles.squadItem}>
-                <div
-                  style={{
-                    ...styles.squadHeader,
-                    background: `linear-gradient(90deg, ${t.color.primary}30, transparent)`,
-                    borderLeft: `3px solid ${t.color.primary}`,
-                  }}
-                >
-                  <span style={{ ...styles.squadTeamName, color: t.color.primary }}>{t.name}</span>
-                  <span style={styles.squadCountBadge}>{t.squad.length}</span>
-                </div>
-                <div style={styles.squadPlayers}>
-                  {t.squad.length === 0 ? (
-                    <div style={styles.emptySquad}>No players yet</div>
-                  ) : (
-                    t.squad.map((p, i) => (
-                      <div key={i} style={styles.squadPlayer}>
-                        <span style={styles.playerNumber}>{i + 1}.</span>
-                        <span style={styles.playerNameSmall}>{p.name}</span>
-                        <span style={styles.playerPrice}>₹{(p.price || 0).toFixed(1)}Cr</span>
-                      </div>
-                    ))
+              <div
+                key={t.name}
+                style={{
+                  ...styles.teamCardNew,
+                  background: highest === t.name 
+                    ? `linear-gradient(135deg, ${t.color.primary}60, ${t.color.secondary}40)`
+                    : `linear-gradient(135deg, ${t.color.primary}20, ${t.color.secondary}10)`,
+                  border: highest === t.name 
+                    ? `2px solid ${t.color.primary}`
+                    : '2px solid transparent',
+                  boxShadow: highest === t.name 
+                    ? `0 0 30px ${t.color.primary}60, 0 0 60px ${t.color.primary}30`
+                    : '0 4px 15px rgba(0,0,0,0.2)',
+                  transform: highest === t.name ? 'scale(1.02)' : 'scale(1)',
+                }}
+              >
+                <div style={styles.teamCardHeader}>
+                  <span style={{ ...styles.teamCardName, color: t.color.primary }}>
+                    {t.name}
+                  </span>
+                  {(!isMultiplayer && t.name !== team) && (
+                    <span style={styles.teamCardAiBadge}>AI</span>
+                  )}
+                  {highest === t.name && (
+                    <span style={styles.leadingBadge}>👑</span>
                   )}
                 </div>
+                <div style={styles.teamCardBudget}>₹{t.budget.toFixed(1)}Cr</div>
+                <div style={styles.teamCardPlayers}>{t.squad.length} players</div>
               </div>
             ))}
           </div>
@@ -2195,5 +2143,353 @@ const styles = {
     background: "#00d4ff",
     borderRadius: "50%",
     animation: "pulse 1.5s infinite",
+  },
+
+  // NEW AUCTION SCREEN STYLES
+  // Status Bar
+  statusBar: {
+    padding: "12px 30px",
+    borderRadius: "8px",
+    margin: "10px 30px",
+    border: "2px solid",
+    textAlign: "center",
+    backdropFilter: "blur(10px)",
+  },
+  statusText: {
+    fontSize: "16px",
+    fontWeight: "bold",
+    color: "white",
+  },
+
+  // New 3-Column Layout
+  newMainLayout: {
+    display: "grid",
+    gridTemplateColumns: "300px 1fr 300px",
+    gap: "25px",
+    padding: "20px 30px",
+    maxWidth: "1600px",
+    margin: "0 auto",
+    minHeight: "calc(100vh - 120px)",
+  },
+
+  // Column Titles
+  columnTitle: {
+    fontSize: "18px",
+    fontWeight: "bold",
+    margin: "0 0 20px 0",
+    color: "#FFD700",
+    textTransform: "uppercase",
+    letterSpacing: "2px",
+  },
+
+  // LEFT COLUMN - Player Info
+  leftColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+  },
+  playerInfoCard: {
+    background: "linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))",
+    borderRadius: "20px",
+    padding: "30px",
+    textAlign: "center",
+    border: "1px solid rgba(255,255,255,0.2)",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+  },
+  playerImageLarge: {
+    width: "140px",
+    height: "140px",
+    borderRadius: "50%",
+    border: "4px solid #FFD700",
+    boxShadow: "0 0 40px rgba(255, 215, 0, 0.4)",
+    marginBottom: "15px",
+  },
+  playerRatingBadgeLarge: {
+    position: "absolute",
+    bottom: "0",
+    right: "0",
+    background: "#FFD700",
+    color: "#1a1a2e",
+    padding: "8px 15px",
+    borderRadius: "20px",
+    fontSize: "16px",
+    fontWeight: "bold",
+  },
+  playerNameLarge: {
+    fontSize: "28px",
+    margin: "15px 0 10px 0",
+    color: "white",
+    fontWeight: "bold",
+  },
+  playerRoleBadge: {
+    fontSize: "14px",
+    color: "rgba(255,255,255,0.8)",
+    background: "rgba(255,255,255,0.15)",
+    padding: "8px 20px",
+    borderRadius: "25px",
+    display: "inline-block",
+    marginBottom: "15px",
+    textTransform: "uppercase",
+    letterSpacing: "1px",
+  },
+  basePriceBox: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "5px",
+    padding: "15px",
+    background: "rgba(255,255,255,0.05)",
+    borderRadius: "12px",
+  },
+  basePriceLabel: {
+    fontSize: "12px",
+    color: "rgba(255,255,255,0.5)",
+    textTransform: "uppercase",
+  },
+  basePriceValue: {
+    fontSize: "24px",
+    color: "#FFD700",
+    fontWeight: "bold",
+  },
+
+  // Bid History Box
+  bidHistoryBox: {
+    background: "rgba(255,255,255,0.05)",
+    borderRadius: "16px",
+    padding: "20px",
+    backdropFilter: "blur(10px)",
+    border: "1px solid rgba(255,255,255,0.1)",
+  },
+  bidHistoryTitle: {
+    fontSize: "14px",
+    color: "#FFD700",
+    margin: "0 0 15px 0",
+    textTransform: "uppercase",
+    letterSpacing: "1px",
+  },
+  bidHistoryList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  bidHistoryItem: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "10px 15px",
+    borderRadius: "8px",
+    background: "rgba(255,255,255,0.03)",
+    borderLeft: "3px solid #666",
+  },
+  bidHistoryTeam: {
+    fontWeight: "bold",
+    fontSize: "14px",
+    color: "rgba(255,255,255,0.9)",
+  },
+  bidHistoryAmount: {
+    fontSize: "14px",
+    color: "#FFD700",
+    fontWeight: "600",
+  },
+  noBidsText: {
+    textAlign: "center",
+    color: "rgba(255,255,255,0.4)",
+    fontStyle: "italic",
+    padding: "20px",
+  },
+
+  // CENTER COLUMN - Bid Display & Controls
+  centerColumn: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "25px",
+    paddingTop: "20px",
+  },
+  currentBidBox: {
+    width: "100%",
+    maxWidth: "450px",
+    padding: "40px",
+    background: "linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,165,0,0.05))",
+    borderRadius: "24px",
+    border: "3px solid #FFD700",
+    textAlign: "center",
+    boxShadow: "0 0 60px rgba(255, 215, 0, 0.2)",
+    transition: "all 0.3s ease",
+  },
+  currentBidLabel: {
+    fontSize: "14px",
+    color: "rgba(255,255,255,0.6)",
+    textTransform: "uppercase",
+    letterSpacing: "3px",
+    marginBottom: "10px",
+  },
+  currentBidAmount: {
+    fontSize: "64px",
+    fontWeight: "bold",
+    color: "#FFD700",
+    textShadow: "0 0 30px rgba(255, 215, 0, 0.5)",
+    marginBottom: "10px",
+  },
+  currentBidderTag: {
+    fontSize: "16px",
+    fontWeight: "bold",
+    marginTop: "5px",
+  },
+  timerBox: {
+    fontSize: "48px",
+    fontWeight: "bold",
+    padding: "15px 40px",
+    background: "rgba(0,0,0,0.3)",
+    borderRadius: "16px",
+    border: "2px solid rgba(255,255,255,0.1)",
+  },
+
+  // Bid Buttons
+  bidButtonsContainer: {
+    width: "100%",
+    maxWidth: "500px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+    alignItems: "center",
+  },
+  bidButtonsRow: {
+    display: "flex",
+    gap: "15px",
+    justifyContent: "center",
+    flexWrap: "wrap",
+  },
+  bidButton: {
+    padding: "20px 25px",
+    borderRadius: "16px",
+    border: "none",
+    background: "linear-gradient(135deg, #00C853, #00E676)",
+    color: "white",
+    cursor: "pointer",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "5px",
+    transition: "all 0.2s ease",
+    boxShadow: "0 4px 20px rgba(0,200,83,0.4)",
+    minWidth: "100px",
+  },
+  bidButtonBlue: {
+    background: "linear-gradient(135deg, #2196F3, #03A9F4)",
+    boxShadow: "0 4px 20px rgba(33,150,243,0.4)",
+  },
+  bidButtonPurple: {
+    background: "linear-gradient(135deg, #9C27B0, #E91E63)",
+    boxShadow: "0 4px 20px rgba(156,39,176,0.4)",
+  },
+  bidBtnValue: {
+    fontSize: "20px",
+    fontWeight: "bold",
+  },
+  bidBtnPrice: {
+    fontSize: "12px",
+    opacity: 0.9,
+  },
+  disabledMessage: {
+    padding: "12px 24px",
+    background: "rgba(0,200,83,0.2)",
+    border: "2px solid #00C853",
+    borderRadius: "12px",
+    color: "#00E676",
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  actionButtonsRow: {
+    display: "flex",
+    gap: "15px",
+    justifyContent: "center",
+  },
+  actionButton: {
+    padding: "12px 25px",
+    borderRadius: "10px",
+    border: "none",
+    background: "linear-gradient(135deg, #666, #888)",
+    color: "white",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "14px",
+    fontWeight: "bold",
+    transition: "all 0.2s ease",
+  },
+  withdrawButton: {
+    background: "linear-gradient(135deg, #d32f2f, #f44336)",
+  },
+  withdrawnBox: {
+    display: "flex",
+    gap: "10px",
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    padding: "15px",
+    background: "rgba(211,47,47,0.1)",
+    borderRadius: "12px",
+    border: "1px solid rgba(211,47,47,0.3)",
+  },
+  withdrawnBadge: {
+    padding: "6px 12px",
+    background: "rgba(211,47,47,0.3)",
+    color: "#ff6b6b",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: "bold",
+  },
+
+  // RIGHT COLUMN - Teams
+  rightColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+  },
+  teamsGrid: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  teamCardNew: {
+    padding: "18px",
+    borderRadius: "16px",
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+    position: "relative",
+    overflow: "hidden",
+  },
+  teamCardHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    marginBottom: "8px",
+  },
+  teamCardName: {
+    fontWeight: "bold",
+    fontSize: "20px",
+  },
+  teamCardAiBadge: {
+    fontSize: "10px",
+    background: "rgba(0,200,83,0.3)",
+    color: "#00E676",
+    padding: "3px 8px",
+    borderRadius: "6px",
+    fontWeight: "bold",
+  },
+  leadingBadge: {
+    fontSize: "16px",
+    marginLeft: "auto",
+  },
+  teamCardBudget: {
+    fontSize: "16px",
+    color: "rgba(255,255,255,0.9)",
+    fontWeight: "600",
+  },
+  teamCardPlayers: {
+    fontSize: "12px",
+    color: "rgba(255,255,255,0.5)",
+    marginTop: "5px",
   },
 };
