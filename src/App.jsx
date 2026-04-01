@@ -111,7 +111,26 @@ export default function App() {
     { name: "LSG", budget: 100, squad: [], color: TEAM_COLORS.LSG, isAI: true },
   ]);
 
+  // Refs to track latest state values for AI bidding (avoid stale closures)
+  const bidRef = useRef(bid);
+  const highestRef = useRef(highest);
+  const teamRef = useRef(team);
+  const withdrawnRef = useRef(withdrawn);
+  const soldRef = useRef(sold);
+  const currentRef = useRef(null);
+  const teamsRef = useRef(teams);
+
   const current = players[index];
+
+  // Update refs whenever state changes
+  useEffect(() => { bidRef.current = bid; }, [bid]);
+  useEffect(() => { highestRef.current = highest; }, [highest]);
+  useEffect(() => { teamRef.current = team; }, [team]);
+  useEffect(() => { withdrawnRef.current = withdrawn; }, [withdrawn]);
+  useEffect(() => { soldRef.current = sold; }, [sold]);
+  useEffect(() => { currentRef.current = current; }, [current]);
+  useEffect(() => { teamsRef.current = teams; }, [teams]);
+
   const bidSound = useRef(new Audio("https://www.soundjay.com/misc/sounds/tink-2.mp3"));
   const soldSound = useRef(new Audio("https://www.soundjay.com/misc/sounds/bell-ringing-01.mp3"));
   const timerWarningSound = useRef(new Audio("https://www.soundjay.com/buttons/sounds/button-3.mp3"));
@@ -173,98 +192,102 @@ export default function App() {
     console.log("[AI] User team:", team);
     console.log("[AI] AI teams:", teams.filter(t => t.isAI && t.name !== team).map(t => t.name));
     
-    // AI Bidding Loop
-    const aiInterval = setInterval(() => {
-      console.log("[AI] === BIDDING ATTEMPT ===");
-      console.log("[AI] Current bid:", bid);
-      console.log("[AI] Timer:", timer);
-      console.log("[AI] Sold status:", sold);
+    // AI Bidding with random delay (simulates real auction behavior)
+    const scheduleNextBid = () => {
+      // Random delay between 1.5s and 4s
+      const delay = 1500 + Math.random() * 2500;
       
-      if (sold) {
-        console.log("[AI] Player sold, skipping bid");
-        return;
-      }
-      
-      const nextBid = +(bid + 0.25).toFixed(2);
-      console.log("[AI] Next bid would be:", nextBid);
-      
-      // Get eligible AI teams (exclude if already highest bidder)
-      const eligibleTeams = teams.filter(t => {
-        const isAI = t.isAI === true;
-        const notUser = t.name !== team;
-        const notWithdrawn = !withdrawn.includes(t.name);
-        const canAfford = t.budget >= nextBid;
-        const notHighestBidder = t.name !== highest; // Skip if already highest
+      return setTimeout(() => {
+        // Use refs to get latest state values (avoid stale closures)
+        const currentBid = bidRef.current;
+        const currentHighest = highestRef.current;
+        const currentTeam = teamRef.current;
+        const currentWithdrawn = withdrawnRef.current;
+        const currentSold = soldRef.current;
+        const currentPlayer = currentRef.current;
+        const currentTeams = teamsRef.current;
         
-        console.log(`[AI] Team ${t.name}: isAI=${isAI}, notUser=${notUser}, notWithdrawn=${notWithdrawn}, canAfford=${canAfford}, notHighest=${notHighestBidder}`);
+        if (currentSold || !started) {
+          return;
+        }
         
-        return isAI && notUser && notWithdrawn && canAfford && notHighestBidder;
-      });
-      
-      console.log("[AI] Eligible teams count:", eligibleTeams.length);
-      
-      if (eligibleTeams.length === 0) {
-        console.log("[AI] No eligible teams to bid");
-        return;
-      }
-      
-      // Select random AI team
-      const bidder = eligibleTeams[Math.floor(Math.random() * eligibleTeams.length)];
-      console.log("[AI] Selected bidder:", bidder.name);
-      
-      // 75% chance to bid
-      const roll = Math.random();
-      console.log("[AI] Roll:", roll.toFixed(3), "Threshold: 0.75");
-      
-      if (roll < 0.75) {
-        console.log("[AI] >>> BID PLACED <<<", bidder.name, "bids");
+        // Calculate next bid based on latest current bid
+        const nextBid = +(currentBid + 0.25).toFixed(2);
         
-        // Randomly choose increment: 70% +25L, 20% +50L, 10% +1Cr
-        const incrementRoll = Math.random();
-        let increment = 0.25;
-        if (incrementRoll > 0.90) increment = 1.00;
-        else if (incrementRoll > 0.70) increment = 0.50;
+        // Get eligible AI teams (exclude if already highest bidder)
+        const eligibleTeams = currentTeams.filter(t => {
+          const isAI = t.isAI === true;
+          const notUser = t.name !== currentTeam;
+          const notWithdrawn = !currentWithdrawn.includes(t.name);
+          const canAfford = t.budget >= nextBid;
+          const notHighestBidder = t.name !== currentHighest;
+          
+          return isAI && notUser && notWithdrawn && canAfford && notHighestBidder;
+        });
         
-        // Calculate new bid value first
-        const currentBid = bid;
-        const newBid = +(currentBid + increment).toFixed(2);
+        if (eligibleTeams.length === 0) {
+          // Schedule next attempt even if no eligible teams now
+          scheduleNextBid();
+          return;
+        }
         
-        console.log("[AI] Bid updated from", currentBid, "to", newBid, "(+" + increment + ")");
+        // Select random AI team
+        const bidder = eligibleTeams[Math.floor(Math.random() * eligibleTeams.length)];
         
-        // Update state
-        setBid(newBid);
-        setHighest(bidder.name);
-        setTimer(15);
-        setActiveTeam(bidder.name);
-        setBidAnimation(true);
+        // 75% chance to bid
+        if (Math.random() < 0.75) {
+          // Randomly choose increment: 70% +25L, 20% +50L, 10% +1Cr
+          const incrementRoll = Math.random();
+          let increment = 0.25;
+          if (incrementRoll > 0.90) increment = 1.00;
+          else if (incrementRoll > 0.70) increment = 0.50;
+          
+          // Calculate new bid based on LATEST current bid
+          const newBid = +(currentBid + increment).toFixed(2);
+          
+          // Prevent duplicate bids - ensure new bid is strictly greater
+          if (newBid <= currentBid) {
+            console.log("[AI] Duplicate bid prevented:", newBid, "<=", currentBid);
+            scheduleNextBid();
+            return;
+          }
+          
+          console.log("[AI] Bid placed:", bidder.name, newBid, "(+", increment, ")");
+          
+          // Update global state
+          setBid(newBid);
+          setHighest(bidder.name);
+          setTimer(15);
+          setActiveTeam(bidder.name);
+          setBidAnimation(true);
+          
+          // Add to history
+          setBidHistory(prev => [{
+            id: Date.now(),
+            team: bidder.name,
+            player: currentPlayer?.name || 'Unknown',
+            amount: newBid,
+            increment: increment,
+            time: new Date().toLocaleTimeString()
+          }, ...prev].slice(0, 10));
+          
+          playBid();
+          
+          setTimeout(() => setBidAnimation(false), 300);
+          setTimeout(() => setActiveTeam(null), 1500);
+        }
         
-        // Add to history with the new bid value
-        setBidHistory(prev => [{
-          id: Date.now(),
-          team: bidder.name,
-          player: current.name,
-          amount: newBid,
-          increment: increment,
-          time: new Date().toLocaleTimeString()
-        }, ...prev].slice(0, 10));
-        
-        // Sound effect
-        playBid();
-        
-        // Reset animation
-        setTimeout(() => setBidAnimation(false), 300);
-        setTimeout(() => setActiveTeam(null), 1500);
-        
-      } else {
-        console.log("[AI] Bid skipped (random chance)");
-      }
-    }, 2500);
+        // Schedule next bid attempt
+        scheduleNextBid();
+      }, delay);
+    };
     
-    console.log("[AI] AI bidding loop started (2.5s interval)");
+    // Start the AI bidding loop
+    const timeoutId = scheduleNextBid();
     
     return () => {
-      console.log("[AI] Stopping AI bidding loop");
-      clearInterval(aiInterval);
+      console.log("[AI] Stopping AI bidding");
+      clearTimeout(timeoutId);
     };
   }, [started, isMultiplayer]); // Re-run when started or multiplayer mode changes
 
@@ -306,6 +329,12 @@ export default function App() {
     const currentBid = bid;
     const newBid = +(currentBid + increment).toFixed(2);
     
+    // Prevent duplicate bids - must be strictly greater than current
+    if (newBid <= currentBid) {
+      showError("Bid must be higher than current bid!");
+      return;
+    }
+    
     // Check if user is already highest bidder
     if (highest === team) {
       showError("You are already the highest bidder!");
@@ -321,6 +350,7 @@ export default function App() {
     
     console.log("[USER BID]", team, "bids", newBid, "(+" + increment + "Cr)");
     
+    // Update global state (single source of truth)
     setBid(newBid);
     setHighest(team);
     setTimer(15);
